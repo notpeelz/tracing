@@ -4,7 +4,7 @@ use syn::{punctuated::Punctuated, Expr, Ident, LitInt, LitStr, Path, Token};
 use proc_macro2::TokenStream;
 use quote::{quote, quote_spanned, ToTokens};
 use syn::ext::IdentExt as _;
-use syn::parse::{Parse, ParseStream};
+use syn::parse::{Parse, ParseBuffer, ParseStream};
 
 /// Arguments to `#[instrument(err(...))]` and `#[instrument(ret(...))]` which describe how the
 /// return value event should be emitted.
@@ -16,6 +16,7 @@ pub(crate) struct EventArgs {
 
 #[derive(Clone, Default, Debug)]
 pub(crate) struct InstrumentArgs {
+    pub(crate) path_prefix: Option<Path>,
     level: Option<Level>,
     pub(crate) name: Option<LitStr>,
     target: Option<LitStr>,
@@ -72,9 +73,25 @@ impl InstrumentArgs {
     }
 }
 
+#[cfg(feature = "electronpipe")]
+fn parse_injected_args(input: &ParseBuffer<'_>) -> syn::Result<InstrumentArgs> {
+    let mut args = InstrumentArgs {
+        path_prefix: Some(input.parse::<Path>()?),
+        ..Default::default()
+    };
+    let _ = input.parse::<Token![,]>()?;
+    Ok(args)
+}
+
+#[cfg(not(feature = "electronpipe"))]
+fn parse_injected_args(input: &ParseBuffer<'_>) -> syn::Result<InstrumentArgs> {
+    Ok(InstrumentArgs::default())
+}
+
 impl Parse for InstrumentArgs {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
-        let mut args = Self::default();
+        let mut args = parse_injected_args(input)?;
+
         while !input.is_empty() {
             let lookahead = input.lookahead1();
             if lookahead.peek(kw::name) {
@@ -344,6 +361,8 @@ impl Parse for Field {
 
 impl ToTokens for Field {
     fn to_tokens(&self, tokens: &mut TokenStream) {
+        let path_prefix = crate::patch::get_path_prefix();
+
         if let Some(ref value) = self.value {
             let name = &self.name;
             let kind = &self.kind;
@@ -357,7 +376,7 @@ impl ToTokens for Field {
             // `instrument` produce empty field values, so changing it now
             // is a breaking change. agh.
             let name = &self.name;
-            tokens.extend(quote!(#name = tracing::field::Empty))
+            tokens.extend(quote!(#name = #path_prefix::field::Empty))
         } else {
             self.kind.to_tokens(tokens);
             self.name.to_tokens(tokens);
@@ -432,12 +451,14 @@ impl Parse for Level {
 
 impl ToTokens for Level {
     fn to_tokens(&self, tokens: &mut TokenStream) {
+        let path_prefix = crate::patch::get_path_prefix();
+
         match self {
-            Level::Trace => tokens.extend(quote!(tracing::Level::TRACE)),
-            Level::Debug => tokens.extend(quote!(tracing::Level::DEBUG)),
-            Level::Info => tokens.extend(quote!(tracing::Level::INFO)),
-            Level::Warn => tokens.extend(quote!(tracing::Level::WARN)),
-            Level::Error => tokens.extend(quote!(tracing::Level::ERROR)),
+            Level::Trace => tokens.extend(quote!(#path_prefix::Level::TRACE)),
+            Level::Debug => tokens.extend(quote!(#path_prefix::Level::DEBUG)),
+            Level::Info => tokens.extend(quote!(#path_prefix::Level::INFO)),
+            Level::Warn => tokens.extend(quote!(#path_prefix::Level::WARN)),
+            Level::Error => tokens.extend(quote!(#path_prefix::Level::ERROR)),
             Level::Path(ref pat) => tokens.extend(quote!(#pat)),
         }
     }

@@ -88,6 +88,8 @@ use syn::{Attribute, ItemFn, Signature, Visibility};
 
 mod attr;
 mod expand;
+mod patch;
+
 /// Instruments a function to create and enter a `tracing` [span] every time
 /// the function is called.
 ///
@@ -566,8 +568,10 @@ pub fn instrument(
 ) -> proc_macro::TokenStream {
     let args = syn::parse_macro_input!(args as attr::InstrumentArgs);
     // Cloning a `TokenStream` is cheap since it's reference counted internally.
-    instrument_precise(args.clone(), item.clone())
-        .unwrap_or_else(|_err| instrument_speculative(args, item))
+    crate::patch::with_args(args.clone(), || {
+        instrument_precise(args.clone(), item.clone())
+            .unwrap_or_else(|_err| instrument_speculative(args, item))
+    })
 }
 
 /// Instrument the function, without parsing the function body (instead using the raw tokens).
