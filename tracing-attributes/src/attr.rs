@@ -32,6 +32,12 @@ pub(crate) struct InstrumentArgs {
 }
 
 impl InstrumentArgs {
+    #[cfg(feature = "electronpipe")]
+    pub(crate) fn level(&self) -> Level {
+        self.level.clone().unwrap_or(Level::Trace)
+    }
+
+    #[cfg(not(feature = "electronpipe"))]
     pub(crate) fn level(&self) -> Level {
         self.level.clone().unwrap_or(Level::Info)
     }
